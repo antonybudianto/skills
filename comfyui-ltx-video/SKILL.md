@@ -1,6 +1,8 @@
 ---
 name: comfyui-ltx-video
-description: Generate AI video (with synced audio) via a local ComfyUI LTX-2.3 Director workflow
+description: Generate AI video with synced audio via a local ComfyUI LTX-2.3 Director workflow.
+version: 0.1.0
+author: Hermes
 metadata:
   hermes:
     required_environment_variables:
@@ -15,7 +17,9 @@ Generate a short video clip with synced audio from a single text prompt by
 running a pre-built ComfyUI workflow (LTX-2.3 22B distilled, two-stage
 Director + latent-upscale pipeline) through ComfyUI's HTTP API.
 
-## When to use this skill
+Stdlib-only Python script — no pip dependencies required.
+
+## When to Use
 
 - The user asks to "generate", "make", or "render" a video/clip locally.
 - The user references ComfyUI, LTX, LTX Director, or a local video model.
@@ -40,23 +44,44 @@ existing footage.
   minutes even on capable GPUs. The script polls for up to 30 minutes by
   default (`--timeout` to change).
 
-## Steps
+## How to Run
 
-1. Take the user's video description as the prompt (this becomes `global_prompt`).
+Invoke the bundled script through the `terminal` tool:
+
+```bash
+python '<path-to>\\skills\\comfyui-ltx-video\\scripts\\generate.py' "a cat closes its eyes and opens them again with shiny blue eyes, then yawns"
+```
+
+Optional flags: `--seed N` (default random each run), `--outdir DIR`
+(default cwd), `--timeout SECONDS` (default 1800).
+
+## Quick Reference
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--seed N` | random | Fixed seed for reproducibility |
+| `--outdir DIR` | cwd | Save output video here |
+| `--timeout N` | 1800 | Max wait seconds for render |
+
+Key node IDs in `workflow.json`:
+- `131` — LTXDirector (prompt lives in `timeline_data.global_prompt`)
+- `30` — RandomNoise (`noise_seed`)
+- `37` — SaveVideo (output)
+
+## Procedure
+
+1. Take the user's video description as the prompt (`global_prompt`).
 2. Run the helper script bundled with this skill using the `terminal` tool:
 
    ```bash
-   python '<path-to>\skills\comfyui-ltx-video\scripts\generate.py' "a cat closes its eyes and opens them again with shiny blue eyes, then yawns"
+   python '<path-to>\\skills\\comfyui-ltx-video\\scripts\\generate.py' "your prompt here"
    ```
 
-   Optional flags: `--seed N` (default random each run), `--outdir DIR`
-   (default cwd), `--timeout SECONDS` (default 1800).
-
 3. The script prints the saved video path to stdout — audio is already muxed
-   into that file, there's no separate audio download step. Send the file to
+   into that file; there's no separate audio download step. Send the file to
    the user. Progress/seed info goes to stderr.
 
-## Notes
+## Pitfalls
 
 - Only `global_prompt` is configurable right now. Everything else (clip
   length, resolution, per-segment prompts, motion/audio guide segments,
@@ -71,3 +96,18 @@ existing footage.
   which already combines the decoded frames with the decoded audio — one
   output file.
 - Default clip length baked into the template is 120 frames @ 24 fps (5s).
+- If ComfyUI is on Windows host and Hermes runs in WSL2, `localhost` won't
+  reach it — set `COMFYUI_URL` to the Windows host IP.
+
+## Verification
+
+Run the script with a short prompt and check that stdout contains a file path
+ending in `.mp4` or `.webm`:
+
+```bash
+python '<path-to>\\skills\\comfyui-ltx-video\\scripts\\generate.py' "test" --timeout 60
+```
+
+If the command exits with an error, verify ComfyUI is running and reachable.
+
+After run the generate script, don't pool or wait for the result. Only verify if asked by user.
