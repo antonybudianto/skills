@@ -41,27 +41,43 @@ existing footage.
   `taeltx2_3.safetensors`). If a model is missing, the script reports the
   node id and message ComfyUI's `/prompt` validation returns.
 - This is a heavy two-stage 22B video+audio pipeline — a run can take several
-  minutes even on capable GPUs. The script polls for up to 30 minutes by
-  default (`--timeout` to change).
+  minutes even on capable GPUs. `generate.py` only queues the job (it does
+  not wait); use `check.py` afterward to see if it's done.
 
 ## How to Run
 
-Invoke the bundled script through the `terminal` tool:
+Two scripts, split so an LLM caller never blocks on a long render:
+
+1. `generate.py` — fire-and-forget. Submits the workflow and returns
+   immediately with a `prompt_id`.
+2. `check.py <prompt_id>` — single lookup (no polling loop). Reports
+   "still running" or downloads the finished video.
 
 ```bash
 python '<path-to>\\skills\\comfyui-ltx-video\\scripts\\generate.py' "a cat closes its eyes and opens them again with shiny blue eyes, then yawns"
+# -> queued: <prompt_id> (seed ...)
+
+python '<path-to>\\skills\\comfyui-ltx-video\\scripts\\check.py' <prompt_id>
+# -> status: still running (not yet in history)   [exit 1]
+# -> <path to saved .mp4>                          [exit 0]
 ```
 
-Optional flags: `--seed N` (default random each run), `--outdir DIR`
-(default cwd), `--timeout SECONDS` (default 1800).
-
 ## Quick Reference
+
+`generate.py`
 
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `--seed N` | random | Fixed seed for reproducibility |
+
+`check.py`
+
+| Flag | Default | Purpose |
+|------|---------|---------|
 | `--outdir DIR` | cwd | Save output video here |
-| `--timeout N` | 1800 | Max wait seconds for render |
+
+Exit codes for `check.py`: `0` done (path on stdout), `1` still running,
+`2` render failed.
 
 Key node IDs in `workflow.json`:
 - `131` — LTXDirector (prompt lives in `timeline_data.global_prompt`)
@@ -71,15 +87,27 @@ Key node IDs in `workflow.json`:
 ## Procedure
 
 1. Take the user's video description as the prompt (`global_prompt`).
-2. Run the helper script bundled with this skill using the `terminal` tool:
+2. Queue the job:
 
    ```bash
    python '<path-to>\\skills\\comfyui-ltx-video\\scripts\\generate.py' "your prompt here"
    ```
 
-3. The script prints the saved video path to stdout — audio is already muxed
-   into that file; there's no separate audio download step. Send the file to
-   the user. Progress/seed info goes to stderr.
+3. Capture the `prompt_id` from the printed `queued: <prompt_id> (seed ...)`
+   line. **Do not poll immediately in a loop.** Only call `check.py` when the
+   user asks for the result, or after enough time has plausibly passed for
+   the render to finish.
+4. Run `check.py <prompt_id>`. If it exits 1 ("still running"), report that
+   to the user rather than retrying repeatedly. If it exits 0, it printed the
+   saved video path — audio is already muxed in, no separate audio step.
+   Send the file to the user.
+
+## Retrieving the Output Video
+
+Always use `check.py` for retrieval — never rely on `generate.py`'s stdout,
+since the render usually isn't done by the time it returns (it doesn't even
+wait). `check.py` downloads via the `/view/` endpoint (NOT `/output/`,
+which often 404s).
 
 ## Pitfalls
 
@@ -98,16 +126,22 @@ Key node IDs in `workflow.json`:
 - Default clip length baked into the template is 120 frames @ 24 fps (5s).
 - If ComfyUI is on Windows host and Hermes runs in WSL2, `localhost` won't
   reach it — set `COMFYUI_URL` to the Windows host IP.
+- **The `/output/` download path returns 404.** Always use `/view/` with
+  `?filename=&subfolder=&type=` query parameters to download generated files.
+- **Do not retry or spin up a new generation while one is processing.** The
+  queue handles one prompt at a time — wait for the existing run to complete
+  before submitting another.
 
 ## Verification
 
-Run the script with a short prompt and check that stdout contains a file path
-ending in `.mp4` or `.webm`:
+Run `generate.py` with a short prompt and check that stdout contains
+`queued: <prompt_id> ...`:
 
 ```bash
-python '<path-to>\\skills\\comfyui-ltx-video\\scripts\\generate.py' "test" --timeout 60
+python '<path-to>\\skills\\comfyui-ltx-video\\scripts\\generate.py' "test"
 ```
 
 If the command exits with an error, verify ComfyUI is running and reachable.
 
-After run the generate script, don't pool or wait for the result. Only verify if asked by user.
+After running `generate.py`, don't poll `check.py` in a loop or wait for the
+result. Only call `check.py` if the user asks for it.

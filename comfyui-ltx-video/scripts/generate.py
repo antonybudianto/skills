@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-Run the LTX-2.3 Director ComfyUI workflow (video + synced audio) via the
-ComfyUI HTTP API.
+Queue the LTX-2.3 Director ComfyUI workflow (video + synced audio) via the
+ComfyUI HTTP API. Fire-and-forget: submits the prompt and returns
+immediately with a prompt_id. Use check.py to poll/retrieve the result.
 
 Usage:
-    python generate.py "your video prompt here" [--seed N] [--outdir DIR]
+    python generate.py "your video prompt here" [--seed N]
 
 Env:
     COMFYUI_URL   Base URL of the running ComfyUI server (default http://127.0.0.1:8188)
 
-Prints the path to the saved video (audio is already muxed in) on success.
+Prints "queued: <prompt_id> (seed <seed>)" to stdout on success.
 Stdlib only.
 """
 import argparse
@@ -17,9 +18,7 @@ import json
 import os
 import random
 import sys
-import time
 import urllib.request
-import urllib.parse
 import urllib.error
 
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
@@ -30,7 +29,6 @@ WORKFLOW_PATH = os.path.join(HERE, "workflow.json")
 DIRECTOR_NODE = "131"  # LTXDirector -> inputs.timeline_data is a JSON *string*
                         # whose "global_prompt" key holds the actual prompt.
 SEED_NODE = "30"       # RandomNoise -> inputs.noise_seed (drives both sampling stages)
-SAVE_NODE = "37"       # SaveVideo   -> where the output filename comes back
 
 
 def _post(path, payload):
@@ -38,11 +36,6 @@ def _post(path, payload):
     req = urllib.request.Request(f"{COMFYUI_URL}{path}", data=data,
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read())
-
-
-def _get(path):
-    with urllib.request.urlopen(f"{COMFYUI_URL}{path}", timeout=30) as r:
         return json.loads(r.read())
 
 
@@ -65,11 +58,6 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("prompt", help="video description; becomes the LTX Director global_prompt")
     ap.add_argument("--seed", type=int, default=None)
-    ap.add_argument("--outdir", default=os.getcwd(),
-                    help="where to save the downloaded video")
-    ap.add_argument("--timeout", type=int, default=1800,
-                    help="max seconds to wait for the render (default 1800s - "
-                         "this is a slow two-stage 22B video+audio pipeline)")
     args = ap.parse_args()
 
     with open(WORKFLOW_PATH) as f:
@@ -93,48 +81,7 @@ def main():
         sys.exit(f"ERROR: can't reach ComfyUI at {COMFYUI_URL} ({e}). "
                  f"Is it running? Set COMFYUI_URL if it's elsewhere.")
     prompt_id = resp["prompt_id"]
-    print(f"queued: {prompt_id} (seed {seed})", file=sys.stderr)
-
-    # --- poll history until done ---
-    poll_interval = 2
-    max_polls = max(1, args.timeout // poll_interval)
-    hist = None
-    for _ in range(max_polls):
-        h = _get(f"/history/{prompt_id}")
-        if prompt_id in h:
-            hist = h[prompt_id]
-            break
-        time.sleep(poll_interval)
-    else:
-        sys.exit(f"ERROR: timed out after {args.timeout}s waiting for the render to finish.")
-
-    status = hist.get("status", {})
-    if status.get("status_str") == "error":
-        for msg_type, data in status.get("messages", []):
-            if msg_type == "execution_error":
-                sys.exit(f"ERROR: node {data.get('node_id')} ({data.get('node_type')}) failed: "
-                         f"{data.get('exception_message')}")
-        sys.exit("ERROR: the render failed. Check the ComfyUI server log for details.")
-
-    # SaveVideo reuses ComfyUI's generic "images" preview key for its UI output.
-    outputs = hist.get("outputs", {})
-    videos = outputs.get(SAVE_NODE, {}).get("images", [])
-    if not videos:
-        sys.exit("ERROR: job finished but no video came back from the SaveVideo node.")
-
-    vid = videos[0]
-    q = urllib.parse.urlencode({
-        "filename": vid["filename"],
-        "subfolder": vid.get("subfolder", ""),
-        "type": vid.get("type", "output"),
-    })
-    os.makedirs(args.outdir, exist_ok=True)
-    dest = os.path.join(args.outdir, vid["filename"])
-    with urllib.request.urlopen(f"{COMFYUI_URL}/view?{q}", timeout=300) as r, \
-            open(dest, "wb") as out:
-        out.write(r.read())
-
-    print(dest)  # stdout = the final video path
+    print(f"queued: {prompt_id} (seed {seed})")
 
 
 if __name__ == "__main__":
