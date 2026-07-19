@@ -131,17 +131,3 @@ which often 404s).
 - **Do not retry or spin up a new generation while one is processing.** The
   queue handles one prompt at a time — wait for the existing run to complete
   before submitting another.
-
-## Verification
-
-Run `generate.py` with a short prompt and check that stdout contains
-`queued: <prompt_id> ...`:
-
-```bash
-python '<path-to>\\skills\\comfyui-ltx-video\\scripts\\generate.py' "test"
-```
-
-If the command exits with an error, verify ComfyUI is running and reachable.
-
-After running `generate.py`, don't poll `check.py` in a loop or wait for the
-result. Only call `check.py` if the user asks for it.
