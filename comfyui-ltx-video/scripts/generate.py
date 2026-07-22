@@ -31,6 +31,20 @@ DIRECTOR_NODE = "131"  # LTXDirector -> inputs.timeline_data is a JSON *string*
 SEED_NODE = "30"       # RandomNoise -> inputs.noise_seed (drives both sampling stages)
 
 
+def _check_comfyui_url():
+    """Warn if COMFYUI_URL points outside localhost — user prompts will leave
+    the machine and could be logged by a third-party server."""
+    import urllib.parse
+    parsed = urllib.parse.urlparse(COMFYUI_URL)
+    host = (parsed.hostname or "").lower()
+    if host not in ("localhost", "127.0.0.1", "::1", ""):
+        print(
+            f"WARN: COMFYUI_URL ({COMFYUI_URL}) is not localhost. "
+            f"Your video prompts will be sent to that server.",
+            file=sys.stderr,
+        )
+
+
 def _post(path, payload):
     data = json.dumps(payload).encode()
     req = urllib.request.Request(f"{COMFYUI_URL}{path}", data=data,
@@ -59,6 +73,8 @@ def main():
     ap.add_argument("prompt", help="video description; becomes the LTX Director global_prompt")
     ap.add_argument("--seed", type=int, default=None)
     args = ap.parse_args()
+
+    _check_comfyui_url()
 
     with open(WORKFLOW_PATH) as f:
         wf = json.load(f)

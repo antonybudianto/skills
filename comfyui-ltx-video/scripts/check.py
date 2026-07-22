@@ -26,6 +26,29 @@ import urllib.error
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
 SAVE_NODE = "37"  # SaveVideo -> where the output filename comes back
 
+# --- non-localhost warning (shared concern with generate.py) ---
+_parsed = urllib.parse.urlparse(COMFYUI_URL)
+if (_parsed.hostname or "").lower() not in ("localhost", "127.0.0.1", "::1", ""):
+    print(
+        f"WARN: COMFYUI_URL ({COMFYUI_URL}) is not localhost. "
+        f"Job history will be fetched from that server.",
+        file=sys.stderr,
+    )
+
+
+def _sanitize_filename(raw: str, outdir: str) -> str:
+    """Reject filenames with path traversal or directory separators.
+    Only allow the basename (no slashes, backslashes, or '..' components)."""
+    # Strip to bare name — reject anything with directory separators
+    name = os.path.basename(raw)
+    if not name or name.startswith((".", "/")):
+        raise ValueError(f"Invalid filename from server: {raw!r}")
+    # Resolve and verify the destination stays inside outdir
+    resolved = os.path.realpath(os.path.join(os.path.realpath(outdir), name))
+    if not resolved.startswith(os.path.realpath(outdir) + os.sep) and resolved != os.path.realpath(outdir):
+        raise ValueError(f"Filename escapes output directory: {raw!r}")
+    return name
+
 
 def _get(path):
     with urllib.request.urlopen(f"{COMFYUI_URL}{path}", timeout=30) as r:
@@ -75,7 +98,8 @@ def main():
         "type": vid.get("type", "output"),
     })
     os.makedirs(args.outdir, exist_ok=True)
-    dest = os.path.join(args.outdir, vid["filename"])
+    safe_name = _sanitize_filename(vid["filename"], args.outdir)
+    dest = os.path.join(args.outdir, safe_name)
     with urllib.request.urlopen(f"{COMFYUI_URL}/view?{q}", timeout=300) as r, \
             open(dest, "wb") as out:
         out.write(r.read())
