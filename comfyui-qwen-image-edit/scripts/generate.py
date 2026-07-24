@@ -3,7 +3,7 @@
 Run the Qwen Image Edit ComfyUI workflow via the ComfyUI HTTP API.
 
 Usage:
-    python generate.py INPUT_IMAGE "edit prompt" [--image2 SECOND_IMAGE] [--seed N]
+    python generate.py INPUT_IMAGE "edit prompt" [--image2 SECOND_IMAGE] [--image3 THIRD_IMAGE] [--seed N]
 
 Env:
     COMFYUI_URL   Base URL of the running ComfyUI server (default http://127.0.0.1:8188)
@@ -32,7 +32,9 @@ NEGATIVE_PROMPT_NODE = "170:149"   # TextEncodeQwenImageEditPlus (negative) -> i
 SEED_NODE = "170:169"              # KSampler -> inputs.seed
 LOAD_IMAGE_NODE = "41"             # LoadImage -> inputs.image (filename after upload)
 LOAD_IMAGE2_NODE = "83"            # LoadImage (optional second image) -> inputs.image
-IMAGE2_CONSUMER_NODES = ["170:149", "170:151"]  # nodes that reference image2
+LOAD_IMAGE3_NODE = "195"           # LoadImage (optional third image) -> inputs.image
+# nodes that reference the extra images, keyed by the input name they use
+EXTRA_IMAGE_CONSUMER_NODES = ["170:149", "170:151"]
 SAVE_NODE = "9"                     # SaveImage (where output filenames come back)
 
 
@@ -103,6 +105,8 @@ def main():
     ap.add_argument("prompt", help="text prompt describing the edit")
     ap.add_argument("--image2", default=None,
                     help="optional path to a second reference image")
+    ap.add_argument("--image3", default=None,
+                    help="optional path to a third reference image")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--outdir", default=os.getcwd(),
                     help="where to save the downloaded result")
@@ -116,6 +120,7 @@ def main():
     try:
         uploaded_name = _upload_image(args.input_image)
         uploaded_name2 = _upload_image(args.image2) if args.image2 else None
+        uploaded_name3 = _upload_image(args.image3) if args.image3 else None
     except urllib.error.URLError as e:
         sys.exit(f"ERROR: can't reach ComfyUI at {COMFYUI_URL} ({e}). "
                  f"Is it running? Set COMFYUI_URL if it's elsewhere.")
@@ -131,15 +136,20 @@ def main():
         else random.randint(0, 2**63 - 1)
     )
 
-    # --- handle the optional second image ---
-    if uploaded_name2:
-        wf[LOAD_IMAGE2_NODE]["inputs"]["image"] = uploaded_name2
-    else:
-        # No second image: drop node 83 and the image2 references so ComfyUI
-        # doesn't try to load the placeholder file baked into workflow.json.
-        for node_id in IMAGE2_CONSUMER_NODES:
-            wf.get(node_id, {}).get("inputs", {}).pop("image2", None)
-        wf.pop(LOAD_IMAGE2_NODE, None)
+    # --- handle the optional extra images ---
+    # For each optional image: wire it in when provided, otherwise drop the
+    # LoadImage node and its imageN references so ComfyUI doesn't try to load
+    # the placeholder file baked into workflow.json.
+    for load_node, input_name, uploaded in (
+        (LOAD_IMAGE2_NODE, "image2", uploaded_name2),
+        (LOAD_IMAGE3_NODE, "image3", uploaded_name3),
+    ):
+        if uploaded:
+            wf[load_node]["inputs"]["image"] = uploaded
+        else:
+            for node_id in EXTRA_IMAGE_CONSUMER_NODES:
+                wf.get(node_id, {}).get("inputs", {}).pop(input_name, None)
+            wf.pop(load_node, None)
 
     # --- queue the job ---
     try:
@@ -153,7 +163,9 @@ def main():
 
     prompt_id = resp["prompt_id"]
     seed = wf[SEED_NODE]["inputs"]["seed"]
-    imgs_desc = uploaded_name + (f" + {uploaded_name2}" if uploaded_name2 else "")
+    imgs_desc = " + ".join(
+        n for n in (uploaded_name, uploaded_name2, uploaded_name3) if n
+    )
     print(f"queued: {prompt_id} (seed {seed}, image: {imgs_desc})", file=sys.stderr)
 
     # --- poll history until done ---

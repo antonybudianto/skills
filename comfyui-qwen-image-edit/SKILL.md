@@ -46,9 +46,10 @@ generation (see `comfyui-ltx-video`).
    python '<path-to>\skills\comfyui-qwen-image-edit\scripts\generate.py' /path/to/input.jpg "make the cat close its eyes"
    ```
 
-   Optional flags: `--image2 /path/to/second.jpg` (a second reference image,
-   e.g. to combine subjects or transfer a style/object), `--seed N`
-   (default random each run), `--outdir DIR` (default cwd).
+   Optional flags: `--image2 /path/to/second.jpg` and
+   `--image3 /path/to/third.jpg` (extra reference images, e.g. to combine
+   subjects or transfer a style/object), `--seed N` (default random each run),
+   `--outdir DIR` (default cwd).
 
 3. The script uploads the input image to ComfyUI, queues the workflow, waits
    for the result, and prints the saved output image path to stdout.
@@ -61,6 +62,7 @@ Key node IDs in `workflow.json`:
 |---------------|----------------------------------------|-----------------------------|
 | `41`          | `LoadImage`                             | Input image (uploaded first) |
 | `83`          | `LoadImage`                             | Optional 2nd image (`--image2`) |
+| `195`         | `LoadImage`                             | Optional 3rd image (`--image3`) |
 | `170:151`     | `TextEncodeQwenImageEditPlus`          | Positive prompt (edit desc)  |
 | `170:149`     | `TextEncodeQwenImageEditPlus`          | Negative prompt (empty)       |
 | `170:169`     | `KSampler`                              | Sampling (seed configurable) |
@@ -73,11 +75,12 @@ Key node IDs in `workflow.json`:
   `LoadImage` node.
 - The workflow supports both 4-step lightning and 40-step full mode via the
   `Enable 4steps LoRA?` toggle (node `170:168`). Default is 4-step mode.
-- A second reference image is optional. When `--image2` is omitted, the script
-  removes node `83` and its `image2` links from the two
-  `TextEncodeQwenImageEditPlus` nodes before queuing, so the placeholder file
-  baked into `workflow.json` is never loaded. When provided, both encode nodes
-  receive `image1` (scaled input) and `image2` (the second reference).
+- The second and third reference images are optional. When `--image2` /
+  `--image3` are omitted, the script removes the matching LoadImage node
+  (`83` / `195`) and its `image2` / `image3` links from the two
+  `TextEncodeQwenImageEditPlus` nodes before queuing, so the placeholder files
+  baked into `workflow.json` are never loaded. When provided, both encode nodes
+  receive `image1` (scaled input) plus the extra references.
 - Only `SaveImage` node output (node `9`) is collected.
 - The script blocks until the job finishes (up to 5 min timeout).
 
